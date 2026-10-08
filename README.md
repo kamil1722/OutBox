@@ -1,0 +1,2 @@
+# OutBox
+Realized Outbox pattern
