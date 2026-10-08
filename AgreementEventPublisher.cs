@@ -1,38 +1,38 @@
 using System.Text;
 using System.Text.Json;
-using AgreementService.Adapters.Db.Context;
-using AgreementService.Domain.Config;
-using AgreementService.Domain.Entities;
-using AgreementService.Domain.Models.EventModels;
-using AgreementService.Domain.Ports;
+using Service.Adapters.Db.Context;
+using Service.Domain.Config;
+using Service.Domain.Entities;
+using Service.Domain.Models.EventModels;
+using Service.Domain.Ports;
 using Confluent.Kafka;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 
-namespace AgreementService.Event.Background
+namespace Service.Event.Background
 {
-    public class AgreementEventPublisher : BackgroundService
+    public class EventPublisher : BackgroundService
     {
         private readonly int _batchSize;
         private readonly int _readDelay;
         private readonly string _topicName;
 
-        private readonly IDbContextFactory<AgreementDbContext> _contextFactory;
+        private readonly IDbContextFactory<ServiceDbContext> _contextFactory;
         private readonly IProducer<string, byte[]> _producer;
-        private readonly ILogPort<AgreementEventPublisher> _logger;
+        private readonly ILogPort<EventPublisher> _logger;
 
-        public AgreementEventPublisher(
-            IDbContextFactory<AgreementDbContext> contextFactory,
+        public EventPublisher(
+            IDbContextFactory<ServiceDbContext> contextFactory,
             IProducer<string, byte[]> producer,
             IOptions<KafkaConfig> kafkaOptions,
             IOptions<ListenerConfig> listenerOptions,
-            ILogPort<AgreementEventPublisher> logger)
+            ILogPort<EventPublisher> logger)
         {
             _contextFactory = contextFactory;
             _producer = producer;
-            _topicName = kafkaOptions.Value.ConsentEventsTopic;
-            _batchSize = listenerOptions.Value.BatcthSize;
+            _topicName = kafkaOptions.Value.EventsTopic;
+            _batchSize = listenerOptions.Value.BatchSize;
             _readDelay = listenerOptions.Value.ReadDelay;
             _logger = logger;
         }
@@ -61,15 +61,16 @@ namespace AgreementService.Event.Background
 
         private async Task<int> ProcessBatchAsync(CancellationToken ct)
         {
-            //Транзакция обязательна для обеспечения атомарности запросов
+            // Транзакция обязательна для обеспечения атомарности запросов
             await using var db = await _contextFactory.CreateDbContextAsync(ct);
             await using var tx = await db.Database.BeginTransactionAsync(ct);
 
-            //FOR UPDATE SKIP LOCKED пропускаем занятый набор строк  в таблице по фильтру WHERE "SentDate" IS NULL для предотвращения гонки подов. 
-            //например если BatchSize = 100 , Под 1 - берет 1-100 значений, Под 2- 101-200 включительно и тд
-            var events = await db.Database.SqlQuery<AgreementEventRow>($"""
-                SELECT "Id", "AgreementId"
-                FROM event.agreements_event
+            // FOR UPDATE SKIP LOCKED пропускаем занятый набор строк в таблице по фильтру
+            // WHERE "SentDate" IS NULL для предотвращения гонки подов.
+            // Например, если BatchSize = 100: Под 1 — берет 1–100 значений, Под 2 — 101–200 и т.д.
+            var events = await db.Database.SqlQuery<EventRow>($"""
+                SELECT "Id", "EntityId"
+                FROM event.events
                 WHERE "SentDate" IS NULL
                 ORDER BY "Id"
                 FOR UPDATE SKIP LOCKED
@@ -88,24 +89,25 @@ namespace AgreementService.Event.Background
 
             var eventIds = events.Select(e => e.Id).ToArray();
 
-            //Получаем набор строк для детализации событий
-            var details = await db.Set<AgreementDetail>()
+            // Получаем набор строк для детализации событий
+            var details = await db.Set<EventDetail>()
                 .Include(e => e.EventType)
                 .Where(d => eventIds.Contains(d.EventId))
-                .OrderBy(d => d.AgreementId)
+                .OrderBy(d => d.EntityId)
                 .ThenBy(d => d.CreateDate)
                 .ToListAsync(ct);
 
             var deliveries = new List<Task<DeliveryResult<string, byte[]>>>(details.Count);
-            //Формируем бтач
+
+            // Формируем батч
             foreach (var detail in details)
             {
-                var payload = new AgreementEventMessage(
-                    detail.AgreementId,
+                var payload = new EventMessage(
+                    detail.EntityId,
                     detail.SubjectId,
-                    detail.Snils,
+                    detail.SubjectCode,
                     detail.BirthDate,
-                    detail.AgreementTypeCode,
+                    detail.EntityTypeCode,
                     detail.Status);
 
                 var kafkaMessage = new Message<string, byte[]>
@@ -114,7 +116,7 @@ namespace AgreementService.Event.Background
                     Value = JsonSerializer.SerializeToUtf8Bytes(payload),
                     Headers = new Headers
                     {
-                        { "source", Encoding.UTF8.GetBytes("agreement-service") },
+                        { "source", Encoding.UTF8.GetBytes("service") },
                         { "event-id", Encoding.UTF8.GetBytes(detail.EventId.ToString()) },
                         { "event-type", Encoding.UTF8.GetBytes(detail.EventType.Code.ToString()) },
                         { "created-at", Encoding.UTF8.GetBytes(detail.CreateDate.ToString("O")) }
@@ -131,7 +133,7 @@ namespace AgreementService.Event.Background
 
             try
             {
-                //Отправляем батч
+                // Отправляем батч
                 await Task.WhenAll(deliveries);
                 await _logger.LogInformation(
                     "Успешная отправка {Count} сообщений в Kafka",
@@ -149,10 +151,11 @@ namespace AgreementService.Event.Background
             }
 
             var now = DateTimeOffset.UtcNow;
-            //Помечаем событие как отправленное
+
+            // Помечаем событие как отправленное
             await db.Database.ExecuteSqlInterpolatedAsync(
                 $"""
-                UPDATE event.agreements_event
+                UPDATE event.events
                 SET "SentDate" = {now}
                 WHERE "Id" = ANY({eventIds})
                 """,
@@ -169,11 +172,11 @@ namespace AgreementService.Event.Background
         }
     }
 
-    public record struct AgreementEventMessage(
-        int AgreementId,
+    public record struct EventMessage(
+        int EntityId,
         int SubjectId,
-        string? Snils,
+        string? SubjectCode,
         DateOnly? BirthDate,
-        string AgreementTypeCode,
+        string EntityTypeCode,
         string Status);
 }
