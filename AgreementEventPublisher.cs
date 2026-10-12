@@ -65,8 +65,7 @@ namespace Service.Event.Background
             await using var db = await _contextFactory.CreateDbContextAsync(ct);
             await using var tx = await db.Database.BeginTransactionAsync(ct);
 
-            // FOR UPDATE SKIP LOCKED пропускаем занятый набор строк в таблице по фильтру
-            // WHERE "SentDate" IS NULL для предотвращения гонки подов.
+            // FOR UPDATE SKIP LOCKED пропускаем занятый набор строк в таблице по фильтру: WHERE "SentDate" IS NULL для предотвращения гонки подов.
             // Например, если BatchSize = 100: Под 1 — берет 1–100 значений, Под 2 — 101–200 и т.д.
             var events = await db.Database.SqlQuery<EventRow>($"""
                 SELECT "Id", "EntityId"
