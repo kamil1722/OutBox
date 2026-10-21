@@ -103,15 +103,13 @@ namespace Service.Event.Background
             {
                 var payload = new EventMessage(
                     detail.EntityId,
-                    detail.SubjectId,
-                    detail.SubjectCode,
-                    detail.BirthDate,
-                    detail.EntityTypeCode,
-                    detail.Status);
+                    detail.Property1,
+                    detail.Property2,
+                    detail.Property3);
 
                 var kafkaMessage = new Message<string, byte[]>
                 {
-                    Key = detail.SubjectId.ToString(),
+                    Key = detail.Property1.ToString(),
                     Value = JsonSerializer.SerializeToUtf8Bytes(payload),
                     Headers = new Headers
                     {
@@ -173,9 +171,7 @@ namespace Service.Event.Background
 
     public record struct EventMessage(
         int EntityId,
-        int SubjectId,
-        string? SubjectCode,
-        DateOnly? BirthDate,
-        string EntityTypeCode,
-        string Status);
+        int Property1,
+        string? Property2,
+        string Property3);
 }
