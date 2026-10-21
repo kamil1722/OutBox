@@ -9,7 +9,7 @@ AS $function$
                     property2     varchar(50);
                     property3     text;
                 BEGIN
-				          -- Получаем идентификаторы атрибутов
+					-- Получаем идентификаторы атрибутов
                     SELECT "Id" INTO property1_id  FROM main.entity_attribute_types WHERE "Code" = 'PROPERTY1' LIMIT 1;
 
                     -- Срабатываем только если изменяется поле1
