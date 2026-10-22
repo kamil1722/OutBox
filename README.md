@@ -1,2 +1,3 @@
 # OutBox
-Realized Outbox pattern
+Stack:
+Postgres, C#, Kafka
