@@ -69,7 +69,7 @@ namespace Service.Event.Background
             // Например, если BatchSize = 100: Под 1 — берет 1–100 значений, Под 2 — 101–200 и т.д.
             var events = await db.Database.SqlQuery<EventRow>($"""
                 SELECT "Id", "EntityId"
-                FROM event.events
+                FROM event.entity_event
                 WHERE "SentDate" IS NULL
                 ORDER BY "Id"
                 FOR UPDATE SKIP LOCKED
@@ -152,7 +152,7 @@ namespace Service.Event.Background
             // Помечаем событие как отправленное
             await db.Database.ExecuteSqlInterpolatedAsync(
                 $"""
-                UPDATE event.events
+                UPDATE event.entity_event
                 SET "SentDate" = {now}
                 WHERE "Id" = ANY({eventIds})
                 """,
