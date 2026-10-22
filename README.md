@@ -1,3 +1,3 @@
 # OutBox
-Stack:
+## Stack:
 Postgres, C#, Kafka
